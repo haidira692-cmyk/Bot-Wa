@@ -28,7 +28,7 @@ async function startBot() {
   // QR LOGIN
   // ==========================
   sock.ev.on("connection.update", ({ qr, connection }) => {
-    if (qr) qrcode.generate(qr, { small: true })
+    if (qr) qrcode.generate(qr, { small: false })
 
     if (connection === "open") {
       console.log("✅ Bot Online!")
@@ -167,3 +167,4 @@ async function startBot() {
 }
 
 startBot()
+
