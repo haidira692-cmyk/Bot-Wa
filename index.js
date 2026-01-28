@@ -1,7 +1,6 @@
 // ==========================
 // IMPORT
 // ==========================
-const readline = require("readline")
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -17,11 +16,6 @@ const fs = require("fs")
 // ==========================
 const AI_KEY = "ISI_API_KEY_KAMU" // opsional
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-})
-
 // ==========================
 // START BOT
 // ==========================
@@ -32,20 +26,25 @@ async function startBot() {
   const sock = makeWASocket({
     logger: P({ level: "silent" }),
     auth: state,
-    printQRInTerminal: false // ❌ matikan QR
+    printQRInTerminal: false // ❌ matikan QR total
   })
 
   sock.ev.on("creds.update", saveCreds)
 
   // ==========================
-  // LOGIN PAIRING CODE (TANPA QR)
+  // LOGIN PAIRING (ENV METHOD - RAILWAY SAFE)
   // ==========================
   if (!sock.authState.creds.registered) {
-    rl.question("Masukkan nomor WA (contoh 628123456789): ", async (phone) => {
+    const phone = process.env.PHONE_NUMBER
+
+    if (!phone) {
+      console.log("❌ PHONE_NUMBER belum diset di Railway Variables!")
+      console.log("👉 Tambahkan: PHONE_NUMBER = 628xxxxxxx")
+    } else {
       const code = await sock.requestPairingCode(phone)
-      console.log("\n✅ Kode Pairing kamu:", code)
-      console.log("👉 Masukkan kode ini di WhatsApp > Perangkat tertaut\n")
-    })
+      console.log("\n✅ Pairing Code:", code)
+      console.log("👉 WhatsApp > Perangkat tertaut > Link with phone number\n")
+    }
   }
 
   // ==========================
