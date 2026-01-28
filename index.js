@@ -1,41 +1,64 @@
+const readline = require("readline")
+const fs = require("fs")
+const axios = require("axios")
+const P = require("pino")
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
-  DisconnectReason,
   downloadMediaMessage
 } = require("@whiskeysockets/baileys")
 
-const P = require("pino")
-const qrcode = require("qrcode-terminal")
-const axios = require("axios")
-const fs = require("fs")
+// ==========================
+// KONFIGURASI
+// ==========================
+const AI_KEY = "ISI_API_KEY_KAMU" // boleh dikosongkan
 
-// ==========================
-// GANTI API KEY AI DISINI
-// ==========================
-const AI_KEY = "ISI_API_KEY_KAMU" // opsional
+// readline untuk input nomor (jalan di lokal)
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+})
 
 async function startBot() {
-
   const { state, saveCreds } = await useMultiFileAuthState("session")
 
   const sock = makeWASocket({
     logger: P({ level: "silent" }),
-    auth: state
+    auth: state,
+    printQRInTerminal: false // ⛔ NONAKTIFKAN QR
   })
 
   // ==========================
-  // QR LOGIN
+  // LOGIN PAKAI KODE (PAIRING)
   // ==========================
-  sock.ev.on("connection.update", ({ qr, connection }) => {
-    if (qr) qrcode.generate(qr, { small: false })
+  if (!state.creds.registered) {
+    // ⚠️ di Railway TIDAK bisa pakai readline
+    // jadi pairing code SEBAIKNYA dilakukan LOKAL
+    rl.question("Masukkan nomor WA (contoh 628123456789): ", async (number) => {
+      try {
+        const code = await sock.requestPairingCode(number.trim())
+        console.log("\n📲 KODE PAIRING ANDA:")
+        console.log(code)
+        console.log("\nMasukkan kode ini di WhatsApp:")
+        console.log("WhatsApp → Perangkat tertaut → Tautkan dengan nomor")
+      } catch (err) {
+        console.error("Gagal minta pairing code:", err)
+      }
+    })
+  }
 
+  // ==========================
+  // SIMPAN SESSION
+  // ==========================
+  sock.ev.on("creds.update", saveCreds)
+
+  sock.ev.on("connection.update", ({ connection }) => {
     if (connection === "open") {
       console.log("✅ Bot Online!")
+      rl.close()
     }
   })
-
-  sock.ev.on("creds.update", saveCreds)
 
   // ==========================
   // AUTO WELCOME + STIKER
@@ -44,9 +67,11 @@ async function startBot() {
     const user = data.participants[0]
 
     if (data.action === "add") {
-      await sock.sendMessage(data.id, {
-        sticker: fs.readFileSync("./welcome.webp") // taruh stiker welcome
-      })
+      if (fs.existsSync("./welcome.webp")) {
+        await sock.sendMessage(data.id, {
+          sticker: fs.readFileSync("./welcome.webp")
+        })
+      }
 
       await sock.sendMessage(data.id, {
         text: `👋 Halo @${user.split("@")[0]} selamat datang!`,
@@ -66,18 +91,19 @@ async function startBot() {
   // AUTO RESPON KATA
   // ==========================
   function autoReply(text) {
-    text = text.toLowerCase()
-
-    if (text.includes("halo")) return "Halo juga 👋"
-    if (text.includes("makasih")) return "Sama-sama 😄"
-    if (text.includes("bot")) return "Ya saya hadir 🤖"
+    const t = text.toLowerCase()
+    if (t.includes("halo")) return "Halo juga 👋"
+    if (t.includes("makasih")) return "Sama-sama 😄"
+    if (t.includes("bot")) return "Ya saya hadir 🤖"
     return null
   }
 
   // ==========================
-  // AI CHAT (OPENROUTER FREE)
+  // AI CHAT
   // ==========================
   async function aiReply(prompt) {
+    if (!AI_KEY) return "AI belum diaktifkan."
+
     try {
       const res = await axios.post(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -92,7 +118,6 @@ async function startBot() {
           }
         }
       )
-
       return res.data.choices[0].message.content
     } catch {
       return "AI lagi sibuk 😅"
@@ -103,7 +128,6 @@ async function startBot() {
   // HANDLE PESAN
   // ==========================
   sock.ev.on("messages.upsert", async ({ messages }) => {
-
     const msg = messages[0]
     if (!msg.message) return
 
@@ -113,52 +137,34 @@ async function startBot() {
       msg.message.extendedTextMessage?.text ||
       ""
 
-    // ======================
-    // MENU
-    // ======================
     if (text === "!menu") {
       await sock.sendMessage(from, {
         text:
 `🤖 *MENU BOT*
-
 !menu
 !intro
 !stiker
-!ai teks
-`
+!ai teks`
       })
     }
 
-    // ======================
-    // INTRO
-    // ======================
     if (text === "!intro") {
       await sock.sendMessage(from, {
         text: "Halo! Saya bot grup Kendari 😄"
       })
     }
 
-    // ======================
-    // STIKER DARI GAMBAR
-    // ======================
     if (msg.message.imageMessage && text === "!stiker") {
       const buffer = await downloadMediaMessage(msg, "buffer")
       await sock.sendMessage(from, { sticker: buffer })
     }
 
-    // ======================
-    // AI CHAT
-    // ======================
     if (text.startsWith("!ai ")) {
       const prompt = text.replace("!ai ", "")
       const reply = await aiReply(prompt)
-
       await sock.sendMessage(from, { text: reply })
     }
 
-    // ======================
-    // AUTO RESPON
-    // ======================
     const reply = autoReply(text)
     if (reply) {
       await sock.sendMessage(from, { text: reply })
@@ -167,4 +173,3 @@ async function startBot() {
 }
 
 startBot()
-
