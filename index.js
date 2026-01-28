@@ -1,67 +1,64 @@
+// ==========================
+// IMPORT
+// ==========================
 const readline = require("readline")
-const fs = require("fs")
-const axios = require("axios")
-const P = require("pino")
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   downloadMediaMessage
 } = require("@whiskeysockets/baileys")
 
-// ==========================
-// KONFIGURASI
-// ==========================
-const AI_KEY = "ISI_API_KEY_KAMU" // boleh dikosongkan
+const P = require("pino")
+const axios = require("axios")
+const fs = require("fs")
 
-// readline untuk input nomor (jalan di lokal)
+// ==========================
+// KONFIG
+// ==========================
+const AI_KEY = "ISI_API_KEY_KAMU" // opsional
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 })
 
+// ==========================
+// START BOT
+// ==========================
 async function startBot() {
+
   const { state, saveCreds } = await useMultiFileAuthState("session")
 
   const sock = makeWASocket({
     logger: P({ level: "silent" }),
     auth: state,
-    printQRInTerminal: false // ⛔ NONAKTIFKAN QR
+    printQRInTerminal: false // ❌ matikan QR
   })
 
+  sock.ev.on("creds.update", saveCreds)
+
   // ==========================
-  // LOGIN PAKAI KODE (PAIRING)
+  // LOGIN PAIRING CODE (TANPA QR)
   // ==========================
-  if (!state.creds.registered) {
-    // ⚠️ di Railway TIDAK bisa pakai readline
-    // jadi pairing code SEBAIKNYA dilakukan LOKAL
-    rl.question("Masukkan nomor WA (contoh 628123456789): ", async (number) => {
-      try {
-        const code = await sock.requestPairingCode(number.trim())
-        console.log("\n📲 KODE PAIRING ANDA:")
-        console.log(code)
-        console.log("\nMasukkan kode ini di WhatsApp:")
-        console.log("WhatsApp → Perangkat tertaut → Tautkan dengan nomor")
-      } catch (err) {
-        console.error("Gagal minta pairing code:", err)
-      }
+  if (!sock.authState.creds.registered) {
+    rl.question("Masukkan nomor WA (contoh 628123456789): ", async (phone) => {
+      const code = await sock.requestPairingCode(phone)
+      console.log("\n✅ Kode Pairing kamu:", code)
+      console.log("👉 Masukkan kode ini di WhatsApp > Perangkat tertaut\n")
     })
   }
 
   // ==========================
-  // SIMPAN SESSION
+  // CONNECTION STATUS
   // ==========================
-  sock.ev.on("creds.update", saveCreds)
-
   sock.ev.on("connection.update", ({ connection }) => {
     if (connection === "open") {
-      console.log("✅ Bot Online!")
-      rl.close()
+      console.log("✅ Bot Online & Siap dipakai!")
     }
   })
 
   // ==========================
-  // AUTO WELCOME + STIKER
+  // WELCOME & GOODBYE
   // ==========================
   sock.ev.on("group-participants.update", async (data) => {
     const user = data.participants[0]
@@ -88,13 +85,15 @@ async function startBot() {
   })
 
   // ==========================
-  // AUTO RESPON KATA
+  // AUTO RESPON
   // ==========================
   function autoReply(text) {
-    const t = text.toLowerCase()
-    if (t.includes("halo")) return "Halo juga 👋"
-    if (t.includes("makasih")) return "Sama-sama 😄"
-    if (t.includes("bot")) return "Ya saya hadir 🤖"
+    text = text.toLowerCase()
+
+    if (text.includes("halo")) return "Halo juga 👋"
+    if (text.includes("makasih")) return "Sama-sama 😄"
+    if (text.includes("bot")) return "Ya saya hadir 🤖"
+
     return null
   }
 
@@ -102,8 +101,6 @@ async function startBot() {
   // AI CHAT
   // ==========================
   async function aiReply(prompt) {
-    if (!AI_KEY) return "AI belum diaktifkan."
-
     try {
       const res = await axios.post(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -118,6 +115,7 @@ async function startBot() {
           }
         }
       )
+
       return res.data.choices[0].message.content
     } catch {
       return "AI lagi sibuk 😅"
@@ -132,39 +130,47 @@ async function startBot() {
     if (!msg.message) return
 
     const from = msg.key.remoteJid
+
     const text =
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
       ""
 
+    // MENU
     if (text === "!menu") {
       await sock.sendMessage(from, {
         text:
 `🤖 *MENU BOT*
+
 !menu
 !intro
-!stiker
-!ai teks`
+!stiker (reply gambar)
+!ai teks
+`
       })
     }
 
+    // INTRO
     if (text === "!intro") {
       await sock.sendMessage(from, {
-        text: "Halo! Saya bot grup Kendari 😄"
+        text: "Halo! Saya bot Kendari 😄"
       })
     }
 
+    // STIKER
     if (msg.message.imageMessage && text === "!stiker") {
       const buffer = await downloadMediaMessage(msg, "buffer")
       await sock.sendMessage(from, { sticker: buffer })
     }
 
+    // AI
     if (text.startsWith("!ai ")) {
       const prompt = text.replace("!ai ", "")
       const reply = await aiReply(prompt)
       await sock.sendMessage(from, { text: reply })
     }
 
+    // AUTO RESPON
     const reply = autoReply(text)
     if (reply) {
       await sock.sendMessage(from, { text: reply })
